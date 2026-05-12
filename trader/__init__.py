@@ -227,8 +227,8 @@ def get_browser():
     options.add_argument('--disable-notifications')
     options.add_argument('--window-size=1920,1080')
      # ✅ 取消注释这两行 - 开启无头模式
-    # options.headless = True
-    # options.add_argument('--headless') 
+    options.headless = True
+    options.add_argument('--headless') 
 
     # options.add_argument('--ignore-certificate-errors')
     options.add_argument('--disable-gpu')
