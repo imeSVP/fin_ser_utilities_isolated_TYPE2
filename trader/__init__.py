@@ -142,6 +142,18 @@ def get_browser():
             continue
         return browser
 '''
+'''
+def get_proxy(country, endpoint):
+    port = np.random.choice(PORTS)
+    PORTS.remove(port)
+    address = f'http://{country.lower()}-{endpoint}:{port}'
+    # return address#####
+    proxy = Proxy()
+    proxy.proxy_type = ProxyType.MANUAL
+    proxy.http_proxy = address
+    proxy.ssl_proxy = address
+    return proxy
+'''
 
 def get_proxy(country, endpoint):
     port = np.random.choice(PORTS)
@@ -155,7 +167,7 @@ def get_proxy(country, endpoint):
     return proxy
 
 # Open the browser with connection to the proxy
-
+'''
 def get_browser():
     options = webdriver.ChromeOptions()
     options.add_argument('--no-sandbox')
@@ -206,8 +218,50 @@ def get_browser():
             print(e)
             continue
         return browser
+'''
+def get_browser():
+    options = webdriver.ChromeOptions()
+    options.add_argument('--disable-notifications')
+    options.add_argument('--window-size=1920,1080')
+     # ✅ 取消注释这两行 - 开启无头模式
+    options.headless = True
+    options.add_argument('--headless') 
 
-print("punto 2")
+    options.add_argument('--ignore-certificate-errors')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('disable-infobars')
+    options.add_experimental_option('excludeSwitches', ['enable-automation'])
+    options.add_experimental_option('useAutomationExtension', False)
+
+    prefs = {'download.default_directory': os.getcwd()}
+    options.add_experimental_option('prefs', prefs)
+
+    proxy = get_proxy(COUNTRY, ENDPOINT)
+    if proxy and proxy.http_proxy:
+        options.add_argument(f'--proxy-server={proxy.http_proxy}')
+        pass
+
+    i = 0
+    while True:
+        print(f'Launching ChromeDriver. Attempt {i}...')
+        i += 1
+        try:
+            service = Service(WEBDRIVER_LOC)  # ← 添加这行
+            browser = webdriver.Chrome(service=service, options=options)  # ← 改这行
+            print("测试 proxy 是否生效...")
+            browser.get('https://api.ipify.org?format=json')
+            time.sleep(2)  # 等待页面加载
+            ip_text = browser.find_element(By.TAG_NAME, 'body').text
+            print(f"当前出口 IP: {ip_text}")
+
+        except WebDriverException as e:
+            print(e)
+            continue
+        return browser
+
+# print("punto 2")
 def randpause(seconds=4, minimum=1):
     delay = max(minimum+random.random(), seconds*random.random())
     time.sleep(delay)
@@ -357,7 +411,7 @@ class Trader():
 
         self._products_new = new
         self._products_off = off
-
+    '''
     def _compare_links(self):
         print('Comparing Links...')
         products_db = load('products')
@@ -428,7 +482,145 @@ class Trader():
                 (r['id_product'] not in on)]
 
         self._update_links(new, off, links_db)
-        
+    '''
+    def _compare_links(self):
+        print('Comparing Links...')
+        products_db = load('products')
+        products_db = products_db[products_db['id_trader'] == self.ID]
+        links_db = load('links')
+        links_db = links_db[(links_db['id_trader'] == self.ID) &
+                            (links_db['on_off'] == 1)]
+
+
+        doc_to = {'SCHEDA+CTE': ['_CTE-SC',
+                                'Condizioni economiche e scheda sintetica'],
+                'SCHEDA': ['_SC', 'Scheda di confrontabilit\xe0'],
+                'CTE': ['', 'Condizioni economiche'],
+                'CG': ['_CG', 'Condizioni generali di contratto'],
+                'SCHEDA+CTE+CG': ['_CTE-SC-CG', (
+                    'Condizioni economiche e scheda sintetica e condizioni '
+                    'generali di contratto')]}
+
+        new = []
+        off = []
+        for p in self.products:
+            # Check if p has enough elements
+            if len(p) < 3:
+                print(f"Warning: product data length insufficient ({len(p)}), skipping: {p}")
+                continue
+            
+            c1 = 'LUCE' if p[0] == 1 else 'GAS'
+            c2 = self._format_title(p[1])
+            
+            # 更宽松的匹配：只检查产品名是否包含 c2
+            db_processed = products_db['nome_intern_product'].str.replace('GAS', '').str.replace('LUCE', '').str.replace(' ', '').str.lower()
+            row = products_db[db_processed.str.contains(c2) & products_db['nome_intern_product'].str.contains(c1)]
+            if len(row) < 1:
+                print(f"WARNING: No matching product found for {p[1]}, skipping")
+                continue
+            _id = row.iloc[0]['id']
+
+            # Main Link
+            r = links_db[(links_db['id_product'] == _id) &
+                        (links_db['id_tipo_link'] == 1)]
+            if len(r) == 0:
+                new.append([self.ID, 1, p[2], None, None, None, _id, 1])
+            else:
+                r = r.iloc[0]
+                if r['description_link'] != p[2]:
+                    off.append(r['id'])
+                    new.append([self.ID, 1, p[2], None, None, None, _id, 1])
+
+            # PDF Links
+            '''
+            r = links_db[(links_db['id_product'] == _id) &
+                        (links_db['id_tipo_link'] == 2) &
+                        (links_db['on_off'] == 1)]
+            address = f'_{self.NAME}_{c1}_{c2.upper()}_RES'
+            address = address.replace('&', 'AND')
+            
+            if len(r) == 0:
+                for i, doc in enumerate(self.DOCTYPES):
+                    idx = 3 + i
+                    # Check if index exists
+                    if idx >= len(p):
+                        print(f"Warning: product data missing element at index {idx}, skipping doc: {doc}")
+                        continue
+                    new.append(
+                        [self.ID, 2, p[idx], address+doc_to[doc][0], doc,
+                        doc_to[doc][1], _id, 1])
+            else:
+                for i, doc in enumerate(self.DOCTYPES):
+                    idx = 3 + i
+                    # Check if index exists
+                    if idx >= len(p):
+                        print(f"Warning: product data missing element at index {idx}, skipping doc: {doc}")
+                        continue
+                        
+                    line = r[r['tipo_info'] == doc]
+                    if len(line) == 0:
+                        new.append(
+                            [self.ID, 2, p[idx], address+doc_to[doc][0], doc,
+                            doc_to[doc][1], _id, 1])
+                    elif line.iloc[0]['description_link'] != p[idx]:
+                        off.append(line.iloc[0]['id'])
+                        new.append(
+                            [self.ID, 2, p[idx], address+doc_to[doc][0], doc,
+                            doc_to[doc][1], _id, 1])
+            '''
+            # PDF Links - Update latest record if exists, otherwise insert new
+            address = f'_{self.NAME}_{c1}_{c2.upper()}_RES'
+            address = address.replace('&', 'AND')
+
+            for i, doc in enumerate(self.DOCTYPES):
+                idx = 3 + i
+                if idx >= len(p):
+                    print(f"Warning: product data missing at index {idx}, skipping {doc}")
+                    continue
+                
+                # Find existing records for this product + document type
+                existing = links_db[(links_db['id_product'] == _id) &
+                                    (links_db['tipo_info'] == doc)]
+                
+                new_url = p[idx]
+                new_title = address + doc_to[doc][0]
+                
+                if len(existing) == 0:
+                    # Does not exist - insert new
+                    new.append([self.ID, 2, new_url, new_title, doc,
+                            doc_to[doc][1], _id, 1])
+                    print(f"INSERT new link: product={_id}, type={doc}")
+                else:
+                    # Exists - get the latest record (largest id)
+                    latest = existing.sort_values('id', ascending=False).iloc[0]
+                    existing_id = latest['id']
+                    current_url = latest['description_link']
+                    
+                    if current_url != new_url:
+                        # URL changed - update the latest record
+                        SQL = f"""
+                            UPDATE links 
+                            SET description_link = '{new_url}',
+                                part_title_file = '{new_title}'
+                            WHERE id = {existing_id}
+                        """
+                        execute(SQL)
+                        print(f"UPDATE latest link {existing_id}: {doc}")
+                        
+                        # Delete other duplicate old records
+                        other_ids = existing[existing['id'] != existing_id]['id'].tolist()
+                        if other_ids:
+                            ids_str = ','.join(str(x) for x in other_ids)
+                            execute(f"DELETE FROM homologation_tags WHERE id_link IN ({ids_str})")
+                            execute(f"DELETE FROM links WHERE id IN ({ids_str})")
+                            print(f"CLEANUP: deleted {len(other_ids)} duplicate records") 
+
+        on = [p['id'] for _, p in products_db.iterrows() if p['on_off'] == 1]
+        off += [r['id'] for _, r in links_db.iterrows() if
+                (r['id_product'] not in on)]
+
+        self._update_links(new, off, links_db)
+
     def _update_links(self, new, off, links_db):
         print('Updating Links...')
         ids = '(' + ','.join([str(x) for x in off]) + ')'
@@ -477,6 +669,11 @@ class Trader():
         links_db = links_db[(links_db['id_trader'] == self.ID) &
                             (links_db['id_tipo_link'] == 2) &
                             (links_db['on_off'] == 1)]
+
+        # 添加调试
+        print(f"DEBUG: Loaded {len(links_db)} PDF links for trader {self.ID}")
+        print(f"DEBUG: Link IDs: {sorted(links_db['id'].tolist())}")
+        
         tags_db = load('search_tags_utl')
         tags_db = tags_db[(tags_db['id_trader'] == self.ID) &
                           (tags_db['on_off'] == 1) &
