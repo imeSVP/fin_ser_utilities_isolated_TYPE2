@@ -1,5 +1,8 @@
+
+
 import re
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service  # ← 添加这一行
 from selenium.common.exceptions import (WebDriverException,
                                         NoSuchElementException,
                                         TimeoutException,
